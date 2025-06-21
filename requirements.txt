@@ -1,0 +1,3 @@
+Flask>=2.0
+selenium>=4.0
+webdrivermanager>=3.0

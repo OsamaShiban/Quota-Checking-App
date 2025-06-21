@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Company Quota Checker</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f4f6f8;
+      color: #333;
+    }
+    .container {
+      max-width: 900px;
+      margin: 2rem auto;
+      padding: 1rem;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 1.5rem;
+      color: #1a73e8;
+    }
+    label {
+      display: block;
+      margin: 0.75rem 0 0.25rem;
+      font-weight: 600;
+    }
+    textarea, input[type="text"] {
+      width: 100%;
+      padding: 0.5rem;
+      border: 1px solid #ccd0d5;
+      border-radius: 4px;
+      font-size: 1rem;
+    }
+    button {
+      display: block;
+      width: 100%;
+      padding: 0.75rem;
+      margin-top: 1rem;
+      background: #1a73e8;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      font-size: 1.1rem;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    button:hover {
+      background: #1664c1;
+    }
+    #progress {
+      margin-top: 1rem;
+      text-align: center;
+    }
+    progress {
+      width: 100%;
+      height: 1.5rem;
+    }
+    #results {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 2rem;
+    }
+    #results th, #results td {
+      padding: 0.75rem;
+      border: 1px solid #e0e0e0;
+      text-align: left;
+      vertical-align: middle;
+    }
+    #results thead {
+      background: #eef3f8;
+    }
+    #results tr:nth-child(even) {
+      background: #fcfcfc;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Company Quota Checker</h1>
+
+    <form id="quota-form">
+      <label for="company-numbers">Company Numbers (one per line)</label>
+      <textarea id="company-numbers" name="company_numbers" rows="4" placeholder="e.g. 12345" required></textarea>
+
+      <label for="start-date">From Date (DD/MM/YYYY)</label>
+      <input type="text" id="start-date" name="start_date" placeholder="DD/MM/YYYY" required>
+
+      <label for="end-date">To Date (DD/MM/YYYY)</label>
+      <input type="text" id="end-date" name="end_date" placeholder="DD/MM/YYYY" required>
+
+      <button type="submit">Fetch Data</button>
+    </form>
+
+    <div id="progress" style="display:none;">
+      <progress id="progress-bar" max="100" value="0"></progress>
+      <span id="progress-text"></span>
+    </div>
+
+    <table id="results" style="display:none;">
+      <thead>
+        <tr>
+          <th>Company Number</th>
+          <th>Quota Used in Last 7 Days</th>
+          <th>Replacement Used in Last 7 Days</th>
+          <th>Quota Used in Last <span id="days-span"></span> Days</th>
+          <th>Replacement Used in Last <span id="days-span-2"></span> Days</th>
+        </tr>
+      </thead>
+      <tbody id="results-body"></tbody>
+    </table>
+  </div>
+
+  <script type="module">
+    const form = document.getElementById('quota-form');
+    const progressDiv = document.getElementById('progress');
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
+    const resultsTable = document.getElementById('results');
+    const resultsBody = document.getElementById('results-body');
+    const daysSpan = document.getElementById('days-span');
+    const daysSpan2 = document.getElementById('days-span-2');
+
+    function parseDate(dstr) {
+      const [d, m, y] = dstr.split('/').map(Number);
+      return new Date(y, m - 1, d);
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      resultsBody.innerHTML = '';
+      resultsTable.style.display = 'none';
+      progressDiv.style.display = 'block';
+      progressBar.value = 0;
+      progressText.textContent = '';
+
+      const formData = new FormData(form);
+      const startDateStr = formData.get('start_date');
+      const endDateStr = formData.get('end_date');
+
+      const startDate = parseDate(startDateStr);
+      const endDate = parseDate(endDateStr);
+      const daysDiff = Math.floor((endDate - startDate) / (1000 * 3600 * 24)) + 1;
+
+      daysSpan.textContent = daysDiff;
+      daysSpan2.textContent = daysDiff;
+
+      const companyNumbers = formData.get('company_numbers')
+        .split('\n')
+        .map(c => c.trim())
+        .filter(c => c.length > 0);
+
+      const response = await fetch('/get_quota', { method: 'POST', body: formData });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buf = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split('\n');
+        buf = parts.pop();
+
+        for (const line of parts) {
+          if (!line.startsWith('data: ')) continue;
+          const msg = JSON.parse(line.slice(6));
+
+          if (msg.progress !== undefined) {
+            progressBar.value = msg.progress;
+            progressText.textContent = `${msg.progress}%`;
+          }
+
+          if (msg.summary) {
+            resultsBody.innerHTML = '';
+            for (const company of companyNumbers) {
+              const data = msg.summary[company];
+              if (!data) continue;
+              const tr = document.createElement('tr');
+              tr.innerHTML = `
+                <td>${company}</td>
+                <td>${data.QuotaLast7}</td>
+                <td>${data.ReplacementLast7}</td>
+                <td>${data.QuotaLastN}</td>
+                <td>${data.ReplacementLastN}</td>
+              `;
+              resultsBody.appendChild(tr);
+            }
+            progressDiv.style.display = 'none';
+            resultsTable.style.display = 'table';
+            return;
+          }
+        }
+      }
+    });
+  </script>
+</body>
+</html>

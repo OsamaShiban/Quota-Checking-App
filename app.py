@@ -4,6 +4,7 @@ import time
 import uuid
 import datetime
 from scraper import fetch_data
+import os
 
 app = Flask(__name__)
 
@@ -93,4 +94,5 @@ def get_quota():
     return Response(generate(), mimetype='text/event-stream')
 
 if __name__ == '__main__':
-    app.run(debug=True, threaded=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True, threaded=True)
